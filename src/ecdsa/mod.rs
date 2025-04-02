@@ -19,6 +19,12 @@ use crate::{
     ffi, from_hex, Error, Message, PublicKey, Secp256k1, SecretKey, Signing, Verification,
 };
 
+#[cfg(target_arch = "valida")]
+use valida_secp256k1::ecdsa as ecdsa_valida;
+
+#[cfg(target_arch = "valida")]
+use valida_secp256k1::secp256k1 as secp256k1_valida;
+
 /// An ECDSA signature
 #[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Signature(pub(crate) ffi::Signature);
@@ -357,6 +363,37 @@ impl<C: Signing> Secp256k1<C> {
     }
 }
 
+#[cfg(target_arch = "valida")]
+fn convert_secp256k1_to_valida_secp256k1(
+    pk: &PublicKey,
+    signature_serialized: &[u8; 64],
+) -> (
+    ecdsa_valida::Signature<secp256k1_valida::Secp256k1Point>,
+    secp256k1_valida::Secp256k1Point,
+) {
+    let uncompressed = pk.serialize_uncompressed();
+
+    let mut x_s: [u8; 32] = uncompressed[1..33].try_into().unwrap();
+    x_s.reverse();
+
+    let mut y_s: [u8; 32] = uncompressed[33..65].try_into().unwrap();
+    y_s.reverse();
+
+    let mut r: [u8; 32] = signature_serialized[0..32].try_into().unwrap();
+    r.reverse();
+
+    let mut s: [u8; 32] = signature_serialized[32..64].try_into().unwrap();
+    s.reverse();
+
+    (
+        ecdsa_valida::Signature {
+            r: secp256k1_valida::Secp256k1Scalar::create(r).expect("r not normalized"),
+            s: secp256k1_valida::Secp256k1Scalar::create(s).expect("s not normalized"),
+        },
+        secp256k1_valida::Secp256k1Point::create(x_s, y_s).expect("cannot create public key"),
+    )
+}
+
 impl<C: Verification> Secp256k1<C> {
     /// Checks that `sig` is a valid ECDSA signature for `msg` using the public
     /// key `pubkey`. Returns `Ok(())` on success. Note that this function cannot
@@ -380,6 +417,7 @@ impl<C: Verification> Secp256k1<C> {
     /// # }
     /// ```
     #[inline]
+    #[cfg(not(target_arch = "valida"))]
     pub fn verify_ecdsa(
         &self,
         msg: &Message,
@@ -398,6 +436,29 @@ impl<C: Verification> Secp256k1<C> {
             } else {
                 Ok(())
             }
+        }
+    }
+
+    #[inline]
+    #[cfg(target_arch = "valida")]
+    pub fn verify_ecdsa(
+        &self,
+        msg: &Message,
+        sig: &Signature,
+        pk: &PublicKey,
+    ) -> Result<(), Error> {
+        let sig = sig.serialize_compact();
+        let converted = convert_secp256k1_to_valida_secp256k1(pk, &sig);
+        let result = ecdsa_valida::ECDSA::<secp256k1_valida::Secp256k1Point>::verify(
+            msg.as_ref(),
+            &converted.0,
+            &converted.1,
+        );
+
+        if result {
+            Ok(())
+        } else {
+            Err(Error::IncorrectSignature)
         }
     }
 }
