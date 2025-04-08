@@ -9,6 +9,11 @@ pub mod serialized_signature;
 
 use core::{fmt, ptr, str};
 
+#[cfg(target_arch = "valida")]
+use valida_secp256k1::ecdsa as ecdsa_valida;
+#[cfg(target_arch = "valida")]
+use valida_secp256k1::secp256k1 as secp256k1_valida;
+
 #[cfg(feature = "recovery")]
 pub use self::recovery::{RecoverableSignature, RecoveryId};
 pub use self::serialized_signature::SerializedSignature;
@@ -18,12 +23,6 @@ use crate::SECP256K1;
 use crate::{
     ffi, from_hex, Error, Message, PublicKey, Secp256k1, SecretKey, Signing, Verification,
 };
-
-#[cfg(target_arch = "valida")]
-use valida_secp256k1::ecdsa as ecdsa_valida;
-
-#[cfg(target_arch = "valida")]
-use valida_secp256k1::secp256k1 as secp256k1_valida;
 
 /// An ECDSA signature
 #[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
@@ -367,10 +366,10 @@ impl<C: Signing> Secp256k1<C> {
 fn convert_secp256k1_to_valida_secp256k1(
     pk: &PublicKey,
     signature_serialized: &[u8; 64],
-) -> (
-    ecdsa_valida::Signature<secp256k1_valida::Secp256k1Point>,
-    secp256k1_valida::Secp256k1Point,
-) {
+) -> Result<
+    (ecdsa_valida::Signature<secp256k1_valida::Secp256k1Point>, secp256k1_valida::Secp256k1Point),
+    Error,
+> {
     let uncompressed = pk.serialize_uncompressed();
 
     let mut x_s: [u8; 32] = uncompressed[1..33].try_into().unwrap();
@@ -385,13 +384,12 @@ fn convert_secp256k1_to_valida_secp256k1(
     let mut s: [u8; 32] = signature_serialized[32..64].try_into().unwrap();
     s.reverse();
 
-    (
-        ecdsa_valida::Signature {
-            r: secp256k1_valida::Secp256k1Scalar::create(r).expect("r not normalized"),
-            s: secp256k1_valida::Secp256k1Scalar::create(s).expect("s not normalized"),
-        },
-        secp256k1_valida::Secp256k1Point::create(x_s, y_s).expect("cannot create public key"),
-    )
+    let r = secp256k1_valida::Secp256k1Scalar::create(r).ok_or(Error::InvalidSignature)?;
+    let s = secp256k1_valida::Secp256k1Scalar::create(s).ok_or(Error::InvalidSignature)?;
+
+    let pk = secp256k1_valida::Secp256k1Point::create(x_s, y_s).ok_or(Error::InvalidPublicKey)?;
+
+    Ok((ecdsa_valida::Signature { r, s }, pk))
 }
 
 impl<C: Verification> Secp256k1<C> {
@@ -448,7 +446,7 @@ impl<C: Verification> Secp256k1<C> {
         pk: &PublicKey,
     ) -> Result<(), Error> {
         let sig = sig.serialize_compact();
-        let converted = convert_secp256k1_to_valida_secp256k1(pk, &sig);
+        let converted = convert_secp256k1_to_valida_secp256k1(pk, &sig)?;
         let result = ecdsa_valida::ECDSA::<secp256k1_valida::Secp256k1Point>::verify(
             msg.as_ref(),
             &converted.0,
