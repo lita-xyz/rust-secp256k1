@@ -52,7 +52,7 @@ wasm-bindgen-test = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 
 [target.'cfg(target_arch = "valida")'.dependencies]
-valida-secp256k1 = { git = "https://github.com/lita-xyz/valida-secp256k1.git", rev = "697e799623fd011daa56887b7826e8022bd1c520" }
+valida-secp256k1 = { git = "https://github.com/lita-xyz/valida-secp256k1.git", rev = "d7359dd742202fb48c38e58a5aac53186d3151fb" }
 
 [lints.rust]
 unexpected_cfgs = { level = "deny", check-cfg = ['cfg(bench)', 'cfg(secp256k1_fuzz)', 'cfg(rust_secp_no_symbol_renaming)'] }

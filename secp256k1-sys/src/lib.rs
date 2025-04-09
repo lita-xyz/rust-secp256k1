@@ -144,7 +144,7 @@ impl SchnorrSigExtraParams {
 #[repr(C)]
 #[derive(Copy, Clone)]
 #[cfg_attr(secp256k1_fuzz, derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
-pub struct PublicKey([c_uchar; 64]);
+pub struct PublicKey(pub [c_uchar; 64]);
 impl_array_newtype!(PublicKey, c_uchar, 64);
 impl_raw_debug!(PublicKey);
 
