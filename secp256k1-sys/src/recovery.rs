@@ -10,7 +10,7 @@ use core::fmt;
 #[repr(C)]
 #[derive(Copy, Clone)]
 #[cfg_attr(secp256k1_fuzz, derive(PartialEq, Eq, PartialOrd, Ord, Hash))]
-pub struct RecoverableSignature([c_uchar; 65]);
+pub struct RecoverableSignature(pub [c_uchar; 65]);
 impl_array_newtype!(RecoverableSignature, c_uchar, 65);
 
 impl RecoverableSignature {

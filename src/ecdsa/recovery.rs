@@ -6,6 +6,11 @@
 
 use core::ptr;
 
+#[cfg(target_arch = "valida")]
+use valida_secp256k1::ecdsa as ecdsa_valida;
+#[cfg(target_arch = "valida")]
+use valida_secp256k1::secp256k1 as secp256k1_valida;
+
 use self::super_ffi::CPtr;
 use super::ffi as super_ffi;
 use crate::ecdsa::Signature;
@@ -18,7 +23,7 @@ pub struct RecoveryId(i32);
 
 /// An ECDSA signature with a recovery ID for pubkey recovery.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, Ord, PartialOrd)]
-pub struct RecoverableSignature(ffi::RecoverableSignature);
+pub struct RecoverableSignature(pub ffi::RecoverableSignature);
 
 impl RecoveryId {
     #[inline]
@@ -184,9 +189,26 @@ impl<C: Signing> Secp256k1<C> {
     }
 }
 
+#[cfg(target_arch = "valida")]
+fn convert_signature(
+    signature_serialized: &[u8],
+) -> Result<ecdsa_valida::Signature<secp256k1_valida::Secp256k1Point>, Error> {
+    let mut r: [u8; 32] = signature_serialized[0..32].try_into().unwrap();
+    r.reverse();
+
+    let mut s: [u8; 32] = signature_serialized[32..64].try_into().unwrap();
+    s.reverse();
+
+    let r = secp256k1_valida::Secp256k1Scalar::create(r).ok_or(Error::InvalidSignature)?;
+    let s = secp256k1_valida::Secp256k1Scalar::create(s).ok_or(Error::InvalidSignature)?;
+
+    Ok(ecdsa_valida::Signature { r, s })
+}
+
 impl<C: Verification> Secp256k1<C> {
     /// Determines the public key for which `sig` is a valid signature for
     /// `msg`. Requires a verify-capable context.
+    #[cfg(not(target_arch = "valida"))]
     pub fn recover_ecdsa(
         &self,
         msg: &Message,
@@ -205,6 +227,30 @@ impl<C: Verification> Secp256k1<C> {
             }
             Ok(key::PublicKey::from(pk))
         }
+    }
+
+    #[cfg(target_arch = "valida")]
+    pub fn recover_ecdsa(
+        &self,
+        msg: &Message,
+        sig: &RecoverableSignature,
+    ) -> Result<key::PublicKey, Error> {
+        let recid = sig.0 .0[64];
+        let sig = sig.to_standard().serialize_compact();
+        let sig = convert_signature(&sig)?;
+        // FIXME: don't expose RecoverableSignature internal structure
+        let pk = ecdsa_valida::ECDSA::<secp256k1_valida::Secp256k1Point>::recover(
+            msg.as_ref(),
+            &sig,
+            &ecdsa_valida::RecoveryId(recid),
+        )
+        .map_err(|_| Error::IncorrectSignature)?;
+
+        let repr: ([u8; 32], [u8; 32]) = pk.to_repr();
+        // FIXME: don't expose key::PublicKey, crate::ffi::PublicKey internal structure
+        Ok(key::PublicKey(crate::ffi::PublicKey(
+            [&repr.0[..], &repr.1].concat().try_into().unwrap(),
+        )))
     }
 }
 
